@@ -1,0 +1,210 @@
+---
+title: "PRICs - Pilot Analysis"
+author: "Danny Sack<br><small>Vanderbilt University School of Medicine</small>"
+date: "<small>`r Sys.Date()`</small>"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    lightbox: true
+    code_download: true
+description: "PRICs - Pilot Analysis"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(rms)
+library(psych)
+library(readxl)
+library(nFactors)
+library(GPArotation)
+library(extrafont)
+library(ggpubr)
+library(table1)
+library(GGally)
+loadfonts()
+knitrSet(lang='markdown', fig.path='png/', fig.align='center', w=9, h=8, cache=TRUE)
+options(prType='html')
+options(knitr.kable.NA = '')
+
+# set seed
+set.seed(1111)
+
+# set theme for plots
+theme <- theme_pubr() +
+  theme(legend.position = "bottom",
+               legend.key = element_rect(fill = NA, color = NA),
+               text = element_text(family = "Arial", size = 10), 
+               axis.line = element_line(), 
+               axis.text = element_text(family = "Arial", color = "black", size = 9),
+               strip.background = element_rect(fill = "grey95"))
+```
+
+# Import and Clean Data
+
+```{r import}
+# read in data and create an age column
+data <- read_excel("Survey_PRICs.xls") %>%
+  mutate(age = as.numeric((as.Date(date) - as.Date(dob)) / 365.25))
+```
+
+```{r clean}
+# start by imputing missing answers for zero in the st_8 survey
+# basically, each question has two components
+# _x_s is the screener, people put either 1 or 0, if they put 1, then they move to
+# _x_fu, where they note how frequently something happened
+# we want to combine the _s and _fu such that folks with missing _fu responses get a 0 if 
+# they said "no" (0) to the _s question, and NA if they said "yes" (1)
+
+data <- data %>%
+  mutate(st8_26 = ifelse(is.na(st8_26_fu), st8_26_s, st8_26_fu),
+         st8_30 = ifelse(is.na(st8_30_fu), st8_30_s, st8_30_fu),
+         st8_36 = ifelse(is.na(st8_36_fu), st8_36_s, st8_36_fu),
+         st8_70 = ifelse(is.na(st8_70_fu), st8_70_s, st8_70_fu),
+         st8_n1 = ifelse(is.na(st8_n1_fu), st8_n1_s, st8_n1_fu),
+         st8_n2 = ifelse(is.na(st_n2_fu), st_n2_s, st_n2_fu),
+         st8_11 = ifelse(is.na(st8_11_fu), st8_11_s, st8_11_fu),
+         st8_31 = ifelse(is.na(st8_31_fu), st8_31_s, st8_31_fu),
+         st8_41 = ifelse(is.na(st8_41_fu), st8_41_s, st8_41_fu))
+
+# now calculate how many people have missingness across rows of answers
+data$missing <- NA
+data$refuse <- NA
+for(i in 1:nrow(data)){
+  data$missing[i] <- sum(is.na(data[i, c(16:39, 60:84, 100:108)]))
+  data$refuse[i] <- sum(data[i, c(16:39, 60:84, 100:108)] == 5)
+}
+table(data$missing, data$refuse)
+
+# now remove instances where the data are missing
+fin_data <- data %>% filter(missing == 0 & refuse == 0)
+
+# relabel factors
+fin_data <- fin_data %>%
+  mutate(pregint = factor(pregint, labels = c("Yes", "No")),
+         relstat = factor(relstat, labels = c("Unmarried, no partner", 
+                                              "Unmarried, living without partner",
+                                              "Unmarried, living with partner",
+                                              "Married, living without partner",
+                                              "Married, living with partner")))
+```
+
+# Descriptive Data
+
+```{r demographics}
+# rename things
+label(fin_data$age) <- "Age"
+units(fin_data$age) <- "years"
+label(fin_data$gest_age) <- "Gestational Age"
+units(fin_data$gest_age) <- "weeks"
+label(fin_data$edu) <- "Education"
+units(fin_data$edu) <- "years"
+label(fin_data$relstat) <- "Relationship Status"
+label(fin_data$relier) <- "Time with Current Non-Pregnant Partner"
+units(fin_data$relier) <- "months"
+label(fin_data$preghx) <- "Previous Pregnancies"
+label(fin_data$pregint) <- "Pregnancy Planned"
+label(fin_data$hivdur) <- "Time Living with HIV"
+units(fin_data$hivdur) <- "months"
+
+# make table 1
+tab1 <- fin_data %>% 
+  select(age, gest_age, edu, relstat, relier, preghx, pregint, hivdur) 
+
+table1(~ age + gest_age + edu + relstat + relier + preghx
+       + pregint + hivdur, data = tab1,
+       render.continuous = c(.="Median [Q1, Q3]",
+                             .="[Min, Max]"))
+```
+
+# Factor Analysis
+
+```{r fact_prep}
+# start by creating dataframe just for the factor analysis (should have 58 questions from 10 scales)
+fac_data <- fin_data[c(16:39, 60:84, 100:108)]
+
+# show distributions of answers
+html(Hmisc::describe(fac_data))
+
+# st8_31 and st8_41 are perfectly collinear
+table(fac_data$st8_31 == fac_data$st8_41)
+table(fac_data$st8_31 == fac_data$st8_30) # check with another
+
+# st8_31: I went to a doctor because of a fight with my partner
+# st8_41: I needed to see a doctor because of a fight with my partner, but I didn't
+
+# remove st8_41, because it is a more complicated question
+fac_fin <- fac_data[c(1:57)]
+names(fac_fin)
+```
+
+```{r scree}
+# create a scree plot
+ev <- eigen(cor(fac_fin)) 
+ap <- parallel(subject=nrow(fac_fin),var=ncol(fac_fin),rep=100,cent=.05)
+nS <- nScree(x=ev$values, aparallel=ap$eigen$qevpea)
+plotnScree(nS)
+```
+
+```{r fa}
+# run factor analysis with crossloadings
+fit <- factanal(fac_fin, 8, rotation = "promax")
+print(fit, digits = 2, cutoff = 0, sort = TRUE)
+
+# run FA w/ cutoff of 0.4
+fit1 <- factanal(fac_fin, 8, rotation = "promax")
+print(fit1, digits = 2, cutoff = 0.4, sort = TRUE)
+
+# run with 7 factors w/o two items on F8 from above
+fit2 <- factanal(fac_fin %>% select(-st8_n1, -st8_26), 7, rotation = "promax")
+print(fit2, digits = 2, cutoff = 0.4, sort = TRUE)
+```
+
+```{r alphas}
+f1 <- fac_fin %>% select(st10_3, st12_ss1, st12_ss3, st12_ss4, st12_ss5)
+alpha(f1) # 0.84 (0.8, 0.87)
+
+f2 <- fac_fin %>% select(st7_3, st7_6, st7_7, st7_n2, st7_10, st7_11, st7_12, st7_14, st7_n1)
+alpha(f2) # 0.84 (0.80, 0.87)
+
+f3 <- fac_fin %>% select(st9_eo1, st9_ep1, st9_ep2, st9_ep5)
+alpha(f3) # 0.88 (0.85, 0.90)
+
+f4 <- fac_fin %>% select(st8_70, st8_n2, st8_11, st8_31) # st8_n1 removed because it also loads on f8
+alpha(f4) # 0.92 (0.92, 0.94)
+
+f5 <- fac_fin %>% select(st9_so2, st9_so4, st9_sp2, st9_sp3, st9_sp4)
+alpha(f5) # 0.86 (0.83, 0.89)
+
+f6 <- fac_fin %>% select(st12_vr1, st12_vr2, st12_vr3, st12_vr5, st12_vr6)
+alpha(f6) # 0.86 (0.83, 0.89)
+
+f7 <- fac_fin %>% select(st4_1, st4_2, st4_3, st4_6, st4_5)
+alpha(f7) # 0.85 (0.81, 0.88)
+```
+
+# Factor Relationships to Each Other
+
+```{r correlations, warning = FALSE}
+# make factors in original data
+fin_data <- fin_data %>%
+  mutate(f1 = st10_3 + st12_ss1 + st12_ss3 + st12_ss4 + st12_ss5,
+         f2 = st7_3 + st7_6 + st7_7 + st7_n2 + st7_10 + st7_11 + st7_12 + st7_14 + st7_n1,
+         f3 = st9_eo1 + st9_ep1 + st9_ep2 + st9_ep5, 
+         f4 = st8_70 + st8_n2 + st8_11 + st8_31,
+         f5 = st9_so2 + st9_so4 + st9_sp2 + st9_sp3 + st9_sp4,
+         f6 = st12_vr1 + st12_vr2 + st12_vr3 + st12_vr5 + st12_vr6,
+         f7 = st4_1 + st4_2 + st4_3 + st4_6 + st4_5)
+
+# make correlation plot
+ggpairs(fin_data, columns = 111:117, #ggplot2::aes(color = pregint), # to add color by a particular variable
+        upper = list(continuous = wrap("cor", method = "spearman", title = "rho")),
+        lower = list(continuous = wrap("points", alpha = 0.5)), 
+        diag = list(continuous = wrap("densityDiag", color = "grey50", fill = "grey50")))
+```
+
+```{r sess_info}
+sessionInfo()
+```
+
+
+

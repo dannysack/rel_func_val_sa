@@ -1,5 +1,5 @@
 # rel_func_val_sa
-This repository contains the code to analyze the data presented in "Exploratory Validation of Relationship Functioning and Male Partner Behavior Scales in Pregnant People Living with HIV in Mpumalanga Province, South Africa", currently in preperation.
+This repository contains the code to analyze the data presented in "Exploratory Validation of Relationship Functioning and Male Partner Behavior Scales in Pregnant People Living with HIV in Mpumalanga Province, South Africa", available at https://pubmed.ncbi.nlm.nih.gov/37171405/.
 
 File Directory:
 
